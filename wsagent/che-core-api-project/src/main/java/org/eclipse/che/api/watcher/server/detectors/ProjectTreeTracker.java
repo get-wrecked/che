@@ -11,6 +11,7 @@
 package org.eclipse.che.api.watcher.server.detectors;
 
 import static java.util.stream.Collectors.toSet;
+import static org.eclipse.che.api.fs.server.WsPathUtils.absolutize;
 import static org.eclipse.che.api.fs.server.WsPathUtils.isRoot;
 import static org.eclipse.che.api.fs.server.WsPathUtils.parentOf;
 import static org.eclipse.che.api.project.shared.dto.event.FileWatcherEventType.CREATED;
@@ -33,6 +34,9 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import org.eclipse.che.api.core.jsonrpc.commons.RequestHandlerConfigurator;
 import org.eclipse.che.api.core.jsonrpc.commons.RequestTransmitter;
+import org.eclipse.che.api.core.notification.EventService;
+import org.eclipse.che.api.project.server.notification.ProjectCreatedEvent;
+import org.eclipse.che.api.project.server.notification.ProjectDeletedEvent;
 import org.eclipse.che.api.project.shared.dto.event.ProjectTreeStateUpdateDto;
 import org.eclipse.che.api.project.shared.dto.event.ProjectTreeTrackingOperationDto;
 import org.eclipse.che.api.project.shared.dto.event.ProjectTreeTrackingOperationDto.Type;
@@ -53,15 +57,18 @@ public class ProjectTreeTracker {
 
   private final RequestTransmitter transmitter;
   private final FileWatcherManager fileWatcherManager;
+  private final EventService eventService;
   private final HiddenItemPathMatcher hiddenItemPathMatcher;
 
   @Inject
   public ProjectTreeTracker(
       RequestTransmitter transmitter,
       FileWatcherManager fileWatcherManager,
+      EventService eventService,
       HiddenItemPathMatcher hiddenItemPathMatcher) {
     this.transmitter = transmitter;
     this.fileWatcherManager = fileWatcherManager;
+    this.eventService = eventService;
     this.hiddenItemPathMatcher = hiddenItemPathMatcher;
   }
 
@@ -142,6 +149,10 @@ public class ProjectTreeTracker {
         return;
       }
 
+      if (isProjectFolder(it)) {
+        eventService.publish(new ProjectCreatedEvent(it));
+      }
+
       if (timers.contains(it)) {
         timers.remove(it);
       } else {
@@ -165,6 +176,10 @@ public class ProjectTreeTracker {
     return it -> {
       if (isExcluded(it)) {
         return;
+      }
+
+      if (isProjectFolder(it)) {
+        eventService.publish(new ProjectDeletedEvent(it));
       }
 
       timers.add(it);
@@ -193,5 +208,9 @@ public class ProjectTreeTracker {
   private boolean isExcluded(String path) {
     String parentPath = parentOf(path);
     return isRoot(parentPath) && hiddenItemPathMatcher.matches(Paths.get(path));
+  }
+
+  private boolean isProjectFolder(String path) {
+    return !absolutize(path).substring(1).contains("/");
   }
 }
